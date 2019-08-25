@@ -1,0 +1,76 @@
+package muc
+
+import (
+	"errors"
+	"runtime"
+
+	"github.com/prometheus/procfs"
+)
+
+// Get the Memory Usage Amount. Result is set in MB.
+func (muc *MemoryUsageController) GetMemoryUsage() (usageMb uint, err error) {
+	return muc.getMemoryUsage()
+}
+
+// Get the Memory Usage Amount. Result is set in MB.
+func (muc *MemoryUsageController) getMemoryUsage() (usageMb uint, err error) {
+
+	muc.usageLock.Lock()
+	defer muc.usageLock.Unlock()
+
+	switch muc.memoryUsageCriterion {
+
+	case MemoryUsageCriterionWorkingSet:
+		return muc.getMemoryUsageWorkingSet()
+
+	case MemoryUsageCriterionResidentMemory:
+		return muc.getMemoryUsageResident()
+
+	default:
+		err = errors.New(ErrMemoryUsageCriterionUnknown)
+		return
+	}
+}
+
+// Returns the Memory Usage as the "Working Set".
+// This Parameter is often used in Windows OS.
+func (muc *MemoryUsageController) getMemoryUsageWorkingSet() (usageMb uint, err error) {
+
+	var memoryUsageStatistics *runtime.MemStats
+
+	// Update the Memory Usage Statistics using the built-in Go Mechanism.
+	memoryUsageStatistics = new(runtime.MemStats)
+	runtime.ReadMemStats(memoryUsageStatistics)
+
+	// Calculate the Working Set.
+	return uint(memoryUsageStatistics.HeapInuse+
+		memoryUsageStatistics.StackInuse+
+		memoryUsageStatistics.MSpanInuse+
+		memoryUsageStatistics.MCacheInuse+
+		memoryUsageStatistics.BuckHashSys+
+		memoryUsageStatistics.GCSys+
+		memoryUsageStatistics.OtherSys) / MB, nil
+}
+
+// Returns the Memory Usage as the "Resident Memory".
+// This Parameter is often used in Linux OS.
+func (muc *MemoryUsageController) getMemoryUsageResident() (usageMb uint, err error) {
+
+	var osProcess procfs.Proc
+	var processStatistics procfs.ProcStat
+
+	// Get the Memory Usage Statistics using the external Library which makes
+	// a special Call to the Operating System. Such a Call is not supported in
+	// Operating Systems of the 'Windows' Family.
+	osProcess, err = procfs.Self()
+	if err != nil {
+		return
+	}
+	processStatistics, err = osProcess.Stat()
+	if err != nil {
+		return
+	}
+
+	// Calculate the resident Memory.
+	return uint(processStatistics.ResidentMemory()) / MB, nil
+}
